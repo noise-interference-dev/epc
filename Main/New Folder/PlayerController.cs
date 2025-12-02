@@ -124,6 +124,9 @@ public class control : MonoBehaviour {
     private InputAction _slideAction;
     private InputAction _glideAction;
     private InputAction _jetpackAction;
+    private InputAction _attackAction;
+    private InputAction _reloadAction;
+
 
     public GameObject ObjGlider;
     public GameObject ObjJetpack;
@@ -136,6 +139,7 @@ public class control : MonoBehaviour {
     // public bool IsExhausted => _isExhausted;
     private HealthSystem _health;
     private StaminaSystem _stamina;
+    private InventoryController _inventoryController;
     
 
     #region initializate
@@ -152,6 +156,8 @@ public class control : MonoBehaviour {
             _slideAction = playerActions.Slide;
             _glideAction = playerActions.Glide;
             _jetpackAction = playerActions.Jetpack;
+            _attackAction = playerActions.Attack;
+            _reloadAction = playerActions.Reload;
             
             _health = GetComponent<HealthSystem>();
             _stamina = GetComponent<StaminaSystem>();
@@ -213,6 +219,8 @@ public class control : MonoBehaviour {
             _glideAction.canceled += OnGlideEnd;
             _jetpackAction.performed += OnJetpackStart;
             _jetpackAction.canceled += OnJetpackEnd;
+            _attackAction.performed += OnAttackStart;
+            _reloadAction.performed += OnReloadStart;
         }
         private void UnsubscribeFromInputActions()
         {
@@ -230,6 +238,8 @@ public class control : MonoBehaviour {
             _glideAction.canceled -= OnGlideEnd;
             _jetpackAction.performed -= OnJetpackStart;
             _jetpackAction.canceled -= OnJetpackEnd;
+            _attackAction.performed -= OnAttackStart;
+            _reloadAction.performed -= OnReloadStart;
         }
     #endregion
     private void Update()
@@ -580,6 +590,32 @@ public class control : MonoBehaviour {
             Debug.Log($"Infinity: {_staminaSettings.infiniteStamina}");
         }
         #endregion */
+    #endregion
+    #region Inventory
+        private bool CanAttack()
+        {
+            return true;
+        }
+        private bool CanReload()
+        {
+            return true;
+        }
+        private void OnAttackStart(InputAction.CallbackContext ctx)
+        {
+            if (CanAttack()) StartAttack();
+        }
+        private void StartAttack()
+        {
+            Debug.Log("df");
+        } 
+        private void OnReloadStart(InputAction.CallbackContext ctx)
+        {
+            if (CanReload()) StartReload();
+        }
+        private void StartReload()
+        {
+            Debug.Log("Df");
+        }
     #endregion
     // gizmoz
     // private void OnDrawGizmosSelected() {

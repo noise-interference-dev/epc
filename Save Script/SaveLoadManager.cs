@@ -10,7 +10,7 @@ using EPC;
 
 public class SaveLoadManager : MonoBehaviour {
     public string map_name;
-    public TMP_InputField infield;
+    private TMP_InputField inputField;
     public string file_path;
     public props prop_list;
     public Transform parent;
@@ -24,21 +24,21 @@ public class SaveLoadManager : MonoBehaviour {
     }
     public void Start() {
         parser = Transform.FindAnyObjectByType<parser>().GetComponent<parser>();
-        parent = Transform.FindAnyObjectByType<Asembler>().transform.GetChild(0).transform;// props_parent.transform;
-        file_path = path_comb(Application.persistentDataPath, "Maps");
+        parent = Transform.FindAnyObjectByType<UnitAsembler>().transform.GetChild(0).transform;// props_parent.transform;
+        file_path = pathCombine(Application.persistentDataPath, "Maps");
             // Directory.CreateDirectory(dir_path_maps);
         //load_achieves();
         // save_map("123");
         // load_map("123");
     }
 
-    private string path_comb(string path, string name) {
+    private string pathCombine(string path, string name) {
         string pth = Path.Combine(path, name);
         return pth;
     }
 
-    public void load_map(string map_loc) {
-        // if (File.Exists(path_comb(file_path, map_name))) {
+    public void mapLoad(string map_loc) {
+        // if (File.Exists(pathCombine(file_path, map_name))) {
         // var stre = JsonUtility.ToJson(parser.decode_text(json, 0), false);
         string json = File.ReadAllText(map_loc);
         json = json.Remove(0, 14);
@@ -47,10 +47,10 @@ public class SaveLoadManager : MonoBehaviour {
             Debug.Log($"{prop.rot} < {Quaternion.Euler(prop.rot)}");
             GameObject gm = Instantiate(Resources.Load<GameObject>($"Props/{prop.id}"), prop.pos, Quaternion.Euler(Vector3.zero), parent);
             objes.Add(gm);
-            var prop_com = gm.GetComponent<prefab_prop>();
-            prop_com.p_del = prop.del;
-            prop_com.p_grv = prop.grv;
-            prop_com.p_kin = prop.kin;
+            var prop_com = gm.GetComponent<Prop>();
+            prop_com.delete = prop.del;
+            prop_com.gravity = prop.grv;
+            prop_com.kinematic = prop.kin;
 
             Destroy(prop_com.gameObject.GetComponent<BuildPrefab>());
             prop_com.transform.position = prop.pos;
@@ -61,45 +61,54 @@ public class SaveLoadManager : MonoBehaviour {
         }
     }
 
-    public void save_map() {
+    public void mapSave() {
         prop_list = new props();
-        foreach (GameObject prope in objes) {
+        foreach (GameObject _prop in objes) {
             var p_l = new prop();
             
-            p_l.id = int.Parse(prope.name.Replace("(Clone)", ""));
-            p_l.pos = prope.transform.position;
-            p_l.rot = prope.transform.eulerAngles;
-            p_l.scl = prope.transform.localScale;
-            var p_c = prope.GetComponent<prefab_prop>();
-            p_l.grv = p_c.p_grv;
-            p_l.del = p_c.p_del;
-            p_l.kin = p_c.p_kin;
+            p_l.id = int.Parse(_prop.name.Replace("(Clone)", ""));
+            p_l.pos = _prop.transform.position;
+            p_l.rot = _prop.transform.eulerAngles;
+            p_l.scl = _prop.transform.localScale;
+            var p_c = _prop.GetComponent<Prop>();
+            p_l.grv = p_c.gravity;
+            p_l.del = p_c.delete;
+            p_l.kin = p_c.kinematic;
             prop_list.props_obj.Add(p_l);
         }
         json = JsonUtility.ToJson(prop_list, true);
         // string cod = parser.encode_text(json, 0);
         map_name = map_name.Replace(".mdm", "");
-        File.WriteAllText(path_comb(file_path, $"{SceneManager.GetActiveScene().name}_{map_name}.mdm"), "eghDcTCgbCdjCh" + json);
+        File.WriteAllText(pathCombine(file_path, $"{SceneManager.GetActiveScene().name}_{map_name}.mdm"), "eghDcTCgbCdjCh" + json);
     }
     public void nameEnter() {
-        map_name = infield.text;
+        map_name = inputField.text;
     }
 
-    public void prop_add(GameObject prope)
+    public void PropAdd(GameObject _prop)
     {
-        objes.Add(prope);
+        objes.Add(_prop);
         var p_l = new prop();
-            
-        Debug.Log(prope.name.Replace("(Clone)", ""));
-        p_l.id = int.Parse(prope.name.Replace("(Clone)", ""));
-        p_l.pos = prope.transform.position;
-        p_l.rot = prope.transform.eulerAngles;
-        p_l.scl = prope.transform.localScale;
-        var p_c = prope.GetComponent<prefab_prop>();
-        p_l.grv = p_c.p_grv;
-        p_l.del = p_c.p_del;
-        p_l.kin = p_c.p_kin;
+
+        // Debug.Log(_prop.name.Replace("(Clone)", ""));
+        p_l.id = int.Parse(_prop.name.Replace("(Clone)", ""));
+        p_l.pos = _prop.transform.position;
+        p_l.rot = _prop.transform.eulerAngles;
+        p_l.scl = _prop.transform.localScale;
+        var p_c = _prop.GetComponent<Prop>();
+        p_l.grv = p_c.gravity;
+        p_l.del = p_c.delete;
+        p_l.kin = p_c.kinematic;
         prop_list.props_obj.Add(p_l);
+    }
+    public bool IsPropContains(GameObject _prop)
+    {
+        PropRemove(_prop);
+        return objes.Contains(_prop);
+    }
+    public void PropRemove(GameObject _prop)
+    {
+        objes.Remove(_prop);
     }
 }
 

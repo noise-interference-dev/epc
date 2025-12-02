@@ -1,15 +1,17 @@
-using System.Collections;
-using System.Collections.Generic;
+// using System.Collections;
+// using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class BuildManager : MonoBehaviour {
-    [Header("Переменные")] 
-    public float gridCur;
+    [Header("Переменные")]
+    public float gridCurrent;
+    private float gridLarge = 1.5f;
+    private float gridSmall = 0.1f;
     public float spawnDistance;
 
     [Header("Настройки Строительства")] 
-    // public Camera mainCamera;
+    public Transform cameraTransform;
     public Transform pointBuildSpawn;
     public Transform parent;
     public GameObject sphere;
@@ -19,34 +21,42 @@ public class BuildManager : MonoBehaviour {
     public GameObject spawned;
     
     [Header("Настройки Скриптов")] 
-    public Inventory Inventory;
-    public Asembler Asembler;
+    public Inventory inventory;
+    public Asembler asembler;
     // Quaternion trot;
+    
+    private void Awake() 
+    {
+        if (inventory == null) inventory = FindAnyObjectByType<Inventory>();
+        if (asembler == null) asembler = FindAnyObjectByType<Asembler>();
+        cameraTransform = Camera.main.transform;
+        gridCurrent = gridLarge;
+    }
 
-    public void Awake() {
-        Inventory = Transform.FindAnyObjectByType<Inventory>();
-        Asembler = Transform.FindAnyObjectByType<Asembler>();
+    public void ToggleGridSize() 
+    {
+        gridCurrent = (gridCurrent == gridLarge) ? gridSmall : gridLarge;
     }
 
     public void setGrid() {
-        if (gridCur == 1.5f) gridCur = 0.1f;
-        else gridCur = 1.5f;
+        if (gridCurrent == 1.5f) gridCurrent = 0.1f;
+        else gridCurrent = 1.5f;
     }
 
     public void propSet(GameObject prop) {
         prefab = prop;
         Destroy(spawned);
-        spawned = Instantiate(prefab, pos, Quaternion.Euler(rot + prefab.GetComponent<BuildPrefab>().prot), parent);  
+        // spawned = Instantiate(prefab, pos, Quaternion.Euler(rot + prefab.GetComponent<BuildPrefab>().prot), parent);  
     }
     
-    public void spawn() {   
+    public void propSpawn() {   
         if(prefab != null) {
-            Asembler.prop_spawn(spawned, pos, rot);
-            spawned = Instantiate(prefab, pos, Quaternion.Euler(rot + prefab.GetComponent<BuildPrefab>().prot), parent);  
-            /*if (Asembler.prop_checker()) {
+            asembler.propSpawn(spawned, pos, rot);
+            // spawned = Instantiate(prefab, pos, Quaternion.Euler(rot + prefab.GetComponent<BuildPrefab>().prot), parent);  
+            /*if (asembler.prop_checker()) {
                 if (spawned.GetComponent<BuildPrefab>().Place(pos, rot)) {
                     spawned = null;
-                    Asembler.props += 1;
+                    asembler.props += 1;
                     return;
                 }
                 spawned.transform.rotation = trot;
@@ -55,7 +65,7 @@ public class BuildManager : MonoBehaviour {
         }
     }
 
-    public void SetTor(Vector3 rote) => rot += rote;
+    public void SetRotation(Vector3 rote) => rot += rote;
 
     public void SetDistance(float dist) {
         if (spawnDistance > 30f) spawnDistance = 30f; 
@@ -80,19 +90,19 @@ public class BuildManager : MonoBehaviour {
             {
                 if (spawned.TryGetComponent<BuildPrefab>(out BuildPrefab bp))
                 {
-                    Vector3 pose = bp.ppos;
-                    pos = new Vector3(Mathf.Round((pointBuildSpawn.transform.position.x + pose.x) / gridCur) * gridCur,
-                                    Mathf.Round((pointBuildSpawn.transform.position.y + pose.y) / gridCur) * gridCur,
-                                    Mathf.Round((sphere.transform.position.z + pose.z) / gridCur) * gridCur);
-                    spawned.transform.position = Vector3.Lerp(spawned.transform.position, pos, 10f * Time.deltaTime);
+                    // Vector3 pose = bp.ppos;
+                    // pos = new Vector3(Mathf.Round((pointBuildSpawn.transform.position.x + pose.x) / gridCurrent) * gridCurrent,
+                    //                 Mathf.Round((pointBuildSpawn.transform.position.y + pose.y) / gridCurrent) * gridCurrent,
+                    //                 Mathf.Round((sphere.transform.position.z + pose.z) / gridCurrent) * gridCurrent);
+                    // spawned.transform.position = Vector3.Lerp(spawned.transform.position, pos, 10f * Time.deltaTime);
                 }
-                else
-                {   
-                    spawned = Instantiate(prefab, pos, Quaternion.Euler(rot + prefab.GetComponent<BuildPrefab>().prot), parent);  
-                }
+                // else
+                // {   
+                //     spawned = Instantiate(prefab, pos, Quaternion.Euler(rot + prefab.GetComponent<BuildPrefab>().prot), parent);  
+                // }
             }
         }
-        /*if(Inventory.usedGunAll != 1) {
+        /*if(inventory.usedGunAll != 1) {
             if(spawned.gameObject != null) {
                 Destroy(spawned.gameObject);
             }

@@ -14,11 +14,11 @@ public class Gun : MonoBehaviour
     public Transform PlayerCam;
 
     [Header("Скрипты")] 
-    public Asembler Asembler;
+    public UnitAsembler Asembler;
     public Inventory Inventory;
 
     public void Aweke() {
-        Asembler = GetComponent<Asembler>();
+        Asembler = GetComponent<UnitAsembler>();
         Inventory = GetComponent<Inventory>();
     }
 
