@@ -1,54 +1,105 @@
-using System.IO;
-using System.Collections;
-using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
+using System;
+using System.Threading;
 using UnityEngine;
-using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 
 namespace EPC {
     public class MainControl : MonoBehaviour {
-        public GameObject panel;
-        [SerializeField] private bool panelState;
-        public List<GameObject> panels = new List<GameObject>();
-        public void rend_time_panel(GameObject panel) {
-            StopAllCoroutines();
-            StartCoroutine(panel_rend(panel));
-        }
-        private string pathComb(string path, string name) {
-            string pth = Path.Combine(path, name);
-            return pth;
-        }
-        private IEnumerator panel_rend(GameObject panel) {
+        public static MainControl I;
+        private void Awake() => I = this;
+        public void PanelRendTime(GameObject targetPanel, float _duration = 1.25f) => 
+            PanelTimerAsync(targetPanel,this.GetCancellationTokenOnDestroy(), _duration).Forget() ;
+        public void PanelRendTime(GameObject targetPanel) =>
+            PanelTimerAsync(targetPanel, this.GetCancellationTokenOnDestroy()).Forget();
+        private async UniTask PanelTimerAsync(GameObject panel, CancellationToken token, float _duration = 1.25f) {
+            if (panel == null) return;
+            
             panel.SetActive(true);
-            yield return new WaitForSeconds(1.25f);
-            if (panel.activeSelf) panel.SetActive(false);
+            await UniTask.Delay(TimeSpan.FromSeconds(_duration), cancellationToken: token);
+            
+            panel.SetActive(false);
         }
-        public void rend_panels(int enter) {
-            for (int i = 0; i < panels.Count; i++) {
-                if (i == enter)
-                    panels[i].SetActive(true);
-                panels[i].SetActive(false);
+
+        public void PanelToggle(GameObject panel) {
+            if (panel != null) panel.SetActive(!panel.activeSelf);
+        }
+
+        public void LoadScene(string sceneName) {
+            SceneManager.LoadScene(sceneName);
+            Debug.Log($"Loaded Scene: {sceneName}");
+        }
+
+        // public async UniTask MoveAndRotateAsync(Transform target, Vector3 endPos, Quaternion endRot, float duration, CancellationToken token) {
+        //     if (target == null) return;
+
+        //     Vector3 startPos = target.position;
+        //     Quaternion startRot = target.rotation;
+        //     float elapsed = 0;
+
+        //     try {
+        //         while (elapsed < duration) {
+        //             elapsed += Time.deltaTime;
+        //             // float t = elapsed / duration;
+        //             float t = Mathf.SmoothStep(0, 1, elapsed / duration);
+
+        //             target.SetPositionAndRotation(
+        //                 Vector3.Lerp(startPos, endPos, t),
+        //                 Quaternion.Slerp(startRot, endRot, t)
+        //             );
+
+        //             await UniTask.Yield(PlayerLoopTiming.Update, token);
+        //         }
+
+        //         target.SetPositionAndRotation(endPos, endRot);
+        //     }
+        //     catch (OperationCanceledException) {
+        //         Debug.Log("Pos & QRot canceled");
+        //     }
+        // }
+        public async UniTask MoveAndRotateAsync(Transform target, Vector3 endPos, Quaternion endRot, float duration, CancellationToken token) {
+            if (target == null) return;
+
+            if (duration <= 0f) {
+                target.SetPositionAndRotation(endPos, endRot);
+                return;
             }
-        }
-        public void scene_load(string name) {
-            SceneManager.LoadScene(name);
-            Debug.Log($"Запуск {name}");
-        }
-        public void panel_on_off() {
-            if (panel) {
-                if (!panelState) {
-                    panelState = !panelState;
-                    panel.SetActive(true);
-                }
-                else {
-                    panelState = !panelState;
-                    panel.SetActive(false);
-                }
+
+            Vector3 startPos = target.position;
+            Quaternion startRot = target.rotation;
+            float elapsed = 0f;
+
+            while (elapsed < duration) {
+                if (token.IsCancellationRequested || target == null) return;
+
+                elapsed += Time.deltaTime;
+                float t = elapsed / duration;
+                t = t * t * (3f - 2f * t);
+
+                target.SetPositionAndRotation(
+                    Vector3.Lerp(startPos, endPos, t),
+                    Quaternion.Slerp(startRot, endRot, t)
+                );
+
+                await UniTask.Yield(PlayerLoopTiming.Update);
             }
-        }       
-        public void game_exit() {
+
+            if (target != null) target.SetPositionAndRotation(endPos, endRot);
+        }
+
+        public void OpenUrl(string url) {
+            if (!string.IsNullOrEmpty(url)) Application.OpenURL(url);
+            else Debug.LogWarning("Link is Empty!");
+        }
+        public void OpenDiscord() => OpenUrl("https://discord.gg/DVPJV6TgVB");
+        public void OpenTelegram() => OpenUrl("https://t.me/epicvoidcorp");
+
+        public void GameExit() {
+            Debug.Log("Game Extt");
+            #if UNITY_EDITOR
+                UnityEditor.EditorApplication.isPlaying = false;
+            #endif
             Application.Quit();
-            Debug.Log("Выход");
         }
     }
 }

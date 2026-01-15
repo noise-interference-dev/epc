@@ -15,7 +15,7 @@ public class prefab_perl : MonoBehaviour
         coll = GetComponent<Collider>();
     }
     private void OnCollisionEnter(Collision collision) {
-        if (!collision.gameObject.GetComponent<Fpc>()) {
+        if (!collision.gameObject.GetComponent<PlayerController>()) {
             GetComponent<Rigidbody>().isKinematic = true;
             // rend.enabled = false;
             // coll.enabled = false;

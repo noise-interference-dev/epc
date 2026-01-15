@@ -1,64 +1,75 @@
+// using System;
+// using System.IO;
+// using System.Collections;
+// using System.Collections.Generic;
+// using UnityEngine;
+// using UnityEngine.Audio;
+// using TMPro;
+
 using System;
-using System.IO;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Audio;
 using TMPro;
 
-public class Music : MonoBehaviour {
-    [System.Serializable]
-    public struct clip {
+namespace EPC {
+    [Serializable]
+    public class ClipData {
         public string name;
         public string author;
-        public bool can_play;
+        public bool can_play = true;
         public AudioClip audio;
     }
-    [SerializeField] private TMP_Text c_name;
-    [SerializeField] private TMP_Text author;
-    public AudioSource source;
-    [SerializeField] private List<clip> clips = new List<clip>();
-    public int clip_cur = 0;
 
-    public void clip_change(int input) {
-        clip_cur += input;
-        StopAllCoroutines();
-        clip_check();
-        StartCoroutine(music_change());
-        clip_rend();
-    }
+    public class Music : MonoBehaviour {
+        [SerializeField] private TMP_Text clipNameTxt, clipAuthorTxt;
+        [SerializeField] private List<ClipData> clips = new List<ClipData>();
+        [SerializeField] private int clipCur = 0;
+        [SerializeField] private AudioSource source;
+        private Coroutine musicCoroutine;
 
-    // IEnumerator start_coroutine() {
-    //     AudioSource audioSource = GetComponent<AudioSource>();
-    //     audioSource.resource = m_Clip;
-    //     audioSource.Play();
-    //     audioSource.resource = m_Resource;
-    //     audioSource.Play();
-    // }
-
-    private IEnumerator music_change() {
-        while (true) {
-            source.resource = clips[clip_cur].audio;
-            source.Play();
-            yield return new WaitForSeconds(source.clip.length);
-            clip_change(1);
+        private void Start() {
+            if (clips.Count > 0) PlayTrack(clipCur);
         }
-    }
 
-    public void clip_check() {
-        if (clip_cur > clips.Count - 1)
-            clip_cur = 0;
-        if (clip_cur < 0)
-            clip_cur = clips.Count - 1;
-        if (!clips[clip_cur].can_play)
-            clip_change(1);
-    }
-    public void clip_rend() {
-        for (int i = 0; i < clips.Count; i++) {
-            if (source.resource == clips[i].audio) {
-                c_name.text = clips[i].name;
-                author.text = $"- {clips[i].author} -";
+        public void ClipChange(int input) {
+            clipCur += input;
+            ValidateIndex();
+
+            int _i = 0;
+            while (!clips[clipCur].can_play && _i < clips.Count) {
+                clipCur = (clipCur + 1) % clips.Count;
+                _i++;
             }
+
+            if (clips[clipCur].can_play) PlayTrack(clipCur);
+            else Debug.LogWarning("No Tracks!");
+        }
+
+        private void PlayTrack(int index) {
+            if (musicCoroutine != null) StopCoroutine(musicCoroutine);
+            
+            ClipData track = clips[index];
+            source.clip = track.audio;
+            source.Play();
+
+            if (clipNameTxt is not null) clipNameTxt.text = track.name;
+            if (clipAuthorTxt is not null) clipAuthorTxt.text = $"- {track.author} -";
+
+            musicCoroutine = StartCoroutine(WaitAndNext());
+        }
+
+        private IEnumerator WaitAndNext() {
+            while (source.clip != null && source.time < source.clip.length - 0.1f) {
+                yield return new WaitForSeconds(1f); 
+            }
+            yield return new WaitForSeconds(1f);
+            ClipChange(1);
+        }
+
+        private void ValidateIndex() {
+            if (clipCur >= clips.Count) clipCur = 0;
+            if (clipCur < 0) clipCur = clips.Count - 1;
         }
     }
 }

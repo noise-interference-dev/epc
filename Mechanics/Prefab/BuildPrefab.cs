@@ -1,4 +1,5 @@
 using System.Collections;
+// using System.Numerics;
 using UnityEngine;
 
 public class BuildPrefab : MonoBehaviour 
@@ -7,13 +8,15 @@ public class BuildPrefab : MonoBehaviour
     private Renderer[] renderers;
     private Material[] materials;
     [SerializeField] private  Material canM;
-    [SerializeField] private Vector3 ppos;
-    [SerializeField] private Vector3 prot;
+    // [SerializeField] private Vector3 ppos;
+    // [SerializeField] private Vector3 prot;
+    // public Vector3 PlusPos => ppos;
+    // public Vector3 PlusRot => prot;
 
     public bool Place(Vector3 _pos, Vector3 _rot)
     {
-        transform.position = _pos + ppos;
-        transform.localEulerAngles = _rot + prot;
+        transform.position = _pos;
+        transform.localEulerAngles = _rot;
         
         for (int i = 0; i < colliders.Length; i++)
         {

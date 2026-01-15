@@ -99,24 +99,33 @@
 //     void OnDisable() => SceneManager.sceneLoaded -= OnSceneLoaded;
 // }
 using System;
+using System.Text;
+using System.Data;
 using System.IO;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEngine.SceneManagement;
-using UnityEngine.UI; // Для TMP_InputField, если используешь password
-using TMPro; // Если используешь TMP
+using TMPro;
+
 
 public class MapsController : MonoBehaviour {
     [SerializeField] private GameObject mapPrefab;
-    [SerializeField] private Transform mapList;
-    // [SerializeField] private TMP_InputField passwordField; // Добавь UI поле для пароля (save/load)
-    private string mapsPath;
+    [SerializeField] private RectTransform mapList;
+    // [SerializeField] private TMP_InputField passwordField;
+    [SerializeField] private string mapsPath;
+    [SerializeField] private List<Sprite> mapImages = new List<Sprite>();
     private string currentMapName;
     private string currentMapLoc;
     private string mapToDelete;
     private GameObject deletePanel;
-    public static MapsController Instance { get; private set; }
+    private static readonly byte[] Key = Encoding.UTF8.GetBytes("7A5f92CpQ0mN10W1uR6qY7pL02XjS4e1"); // 32 bytes
+    private static readonly byte[] IV = Encoding.UTF8.GetBytes("nU82XyZpQ1mN90W1");  // 16 bytes
+    // public static MapsController Instance { get; private set; }
+
     #region Initialization
         private void OnEnable() => SceneManager.sceneLoaded += OnSceneLoaded;
         private void OnDisable() => SceneManager.sceneLoaded -= OnSceneLoaded;
@@ -125,33 +134,29 @@ public class MapsController : MonoBehaviour {
                 var loader = FindAnyObjectByType<SaveLoadManager>();
                 if (loader != null) {
                     string fullPath = Path.Combine(mapsPath, $"{currentMapLoc}_{currentMapName}.mdm");
-                    // string password = passwordField?.text ?? ""; // Берем пароль из UI, если есть
+                    // string password = passwordField?.text ?? "";
                     // loader.MapLoad(fullPath, password);
                 }
             }
         }
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
-        public static void Init() 
-        {
-            if (Instance != null) return;
+        // [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        // public static void Init()  {
+        //     if (Instance != null) return;
 
-            GameObject _go = new GameObject("MapManager");
-            Instance = _go.AddComponent<MapsController>();
-            DontDestroyOnLoad(_go);
-        }
-        private void Awake()
-        {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
+        //     GameObject _go = new GameObject("MapManager");
+        //     Instance = _go.AddComponent<MapsController>();
+        //     DontDestroyOnLoad(_go);
+        // }
+        private void Awake() {
+            // if (Instance != null && Instance != this) {
+            //     Destroy(gameObject);
+            //     return;
+            // }
 
-            Instance = this;
-            DontDestroyOnLoad(gameObject);
+            // Instance = this;
+            // DontDestroyOnLoad(gameObject);
             mapsPath = Path.Combine(Application.persistentDataPath, "Maps");
         }
-
 
         private void Start() {
             if (!Directory.Exists(mapsPath)) {
@@ -161,36 +166,68 @@ public class MapsController : MonoBehaviour {
         }
     #endregion
     public void RefreshMapsList() {
-        ClearMapList();
-        string[] mapFiles = Directory.GetFiles(mapsPath, "*.mdm");
-        foreach (string _filePath in mapFiles) {
-            string _fileName = Path.GetFileNameWithoutExtension(_filePath);
-            if (_fileName.Length < 4) continue;
-            // Проверка на читаемость (теперь с шифрованием, убрал старый parser)
-            // if (IsValidMapFile(_filePath, "")) { // Пробуем с empty password сначала
-            string _mapVariation = _fileName.Substring(0, 3);
-            string _mapName = _fileName.Substring(4);
+        Scene scene = SceneManager.GetActiveScene();
+        if (scene.name != "MainMenu") return;
 
-            int _underscope = _fileName.IndexOf("_");
-            if (_underscope >= 0 && _underscope + 1 < _fileName.Length)
-            {
-                _mapVariation = _fileName.Substring(0, _underscope);
-                _mapName = _fileName.Substring(_underscope + 1);
+        ClearMapList();
+
+        if (!Directory.Exists(mapsPath)) return;
+
+        string[] mapFiles = Directory.GetFiles(mapsPath, "*.mdm");
+
+        foreach (string filePath in mapFiles) {
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+            if (string.IsNullOrEmpty(fileName)) continue;
+
+            int underscore = fileName.IndexOf('_');
+            if (underscore <= 0 || underscore >= fileName.Length - 1) continue;
+
+            string mapVariation = fileName.Substring(0, underscore);
+            string mapName = fileName.Substring(underscore + 1);
+
+            string version = null;
+
+            try {
+                using FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+                using Aes aes = Aes.Create();
+                aes.Key = Key;
+                aes.IV = IV;
+
+                using ICryptoTransform decryptor = aes.CreateDecryptor();
+                using CryptoStream cryptoStream = new CryptoStream(fs, decryptor, CryptoStreamMode.Read);
+                using GZipStream gz = new GZipStream(cryptoStream, CompressionMode.Decompress);
+                using BinaryReader reader = new BinaryReader(gz, Encoding.UTF8);
+
+                version = reader.ReadString();
             }
-            LoadMapEntry(_mapVariation, _mapName);
-            // }
+            catch (Exception e) {
+                Debug.LogError($"File Load/Decrypt Error ({fileName}): {e.Message}");
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(version)) continue;
+
+            LoadMapEntry(mapVariation, mapName);
         }
     }
-    private void LoadMapEntry(string _mapVariation, string _mapName) {
-        GameObject mapObject = Instantiate(mapPrefab, mapList);
-        var _mapComponent = mapObject.GetComponent<MapComponent>();
 
-        _mapComponent.MapName.text = _mapName;
-        _mapComponent.MapLocation.text = VariationToLoaction(_mapVariation);
-        _mapComponent.MapVariation = _mapVariation;
+    private void LoadMapEntry(string mapVariation, string mapName) {
+        string loc = VariationToLoaction(mapVariation);
+        Debug.Log("fg");
+        if (!int.TryParse(mapVariation, out int index))
+        {
+            Debug.Log("af," + index);    
+            index = 0;
+        } 
+        if (index < 0 || index >= mapImages.Count) return;
+
+        GameObject mapObject = Instantiate(mapPrefab, mapList);
+        MapMeta mapComponent = mapObject.GetComponent<MapMeta>();
+        if (mapComponent == null) return;
+
+        mapComponent.MapSet(mapName, loc, mapVariation, mapImages[index]);
     }
-    private string VariationToLoaction(string _mapVariation)
-    {
+    private string VariationToLoaction(string _mapVariation) {
         return _mapVariation switch {
             "000" => "Devs room",
             "001" => "Ground",
@@ -198,14 +235,15 @@ public class MapsController : MonoBehaviour {
             _ => "Unknown"
         };
     }
+
     #region Delete
         private void ClearMapList() {
+            if (mapList == null) return;
             for (int i = mapList.childCount - 1; i >= 0; i--) {
                 Destroy(mapList.GetChild(i).gameObject);
             }
         }
-        public void WantToDeleteMap(string _mapToDelete)
-        {
+        public void WantToDeleteMap(string _mapToDelete) {
             mapToDelete = _mapToDelete;
             deletePanel.SetActive(true);
         }
@@ -224,13 +262,10 @@ public class MapsController : MonoBehaviour {
             }
             yield return null;
         }
-
     #endregion
     public void StartMap(string _mapLocation, string _mapName) {
         currentMapLoc = _mapLocation;
         currentMapName = _mapName;
-        SceneManager.LoadScene(_mapLocation);
+        SceneManager.LoadScene(_mapName);
     }
-
-    
 }

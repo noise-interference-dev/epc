@@ -1,130 +1,309 @@
 using System;
 using System.IO;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using System.Text;
+using System.Data;
 using TMPro;
-using EPC;
+
+public class PropInfo : MonoBehaviour {
+    public Vector3 SelfGravityVector = new Vector3(0, -9.81f, 0);
+    public bool CanDelete = true;
+    public bool CanGravity = true;
+    public bool HasSelfGravity = false;
+}
 
 public class SaveLoadManager : MonoBehaviour {
-    public string map_name;
-    private TMP_InputField inputField;
-    public string file_path;
-    public props prop_list;
-    public Transform parent;
-    public string json;
-    public Vector3 rote;
-    [SerializeField] private List<GameObject> objes = new List<GameObject>();
+    [SerializeField] private string currentMapName = "NewMap";
+    [SerializeField] private Transform propsParent;
+    [SerializeField] private string resourcesFolder = "Props";
+    
+    private Dictionary<short, GameObject> prefabCache = new Dictionary<short, GameObject>();
+    [SerializeField] private TMP_InputField mapNameInput;
+    private string saveDirectory;
 
-    [SerializeField] private EPC.parser parser;
-    public void Aweke() {
-        DontDestroyOnLoad(this.gameObject);
-    }
-    public void Start() {
-        parser = Transform.FindAnyObjectByType<parser>().GetComponent<parser>();
-        parent = Transform.FindAnyObjectByType<UnitAsembler>().transform.GetChild(0).transform;// props_parent.transform;
-        file_path = pathCombine(Application.persistentDataPath, "Maps");
-            // Directory.CreateDirectory(dir_path_maps);
-        //load_achieves();
-        // save_map("123");
-        // load_map("123");
+    [SerializeField] private int loadBatchSize = 255;
+    public float loadProgress = 0f;
+    private static readonly byte[] Key = Encoding.UTF8.GetBytes("7A5f92CpQ0mN10W1uR6qY7pL02XjS4e1"); // 32 bytes
+    private static readonly byte[] IV = Encoding.UTF8.GetBytes("nU82XyZpQ1mN90W1");  // 16 bytes
+
+    void Start() => Initialize();
+
+    private void Initialize() {
+        saveDirectory = Path.Combine(Application.persistentDataPath, "Maps");
+        if (!Directory.Exists(saveDirectory)) Directory.CreateDirectory(saveDirectory);
+        CacheAllPrefabs();
     }
 
-    private string pathCombine(string path, string name) {
-        string pth = Path.Combine(path, name);
-        return pth;
+    private void CacheAllPrefabs() {
+        GameObject[] prefabs = Resources.LoadAll<GameObject>(resourcesFolder);
+        foreach (var p in prefabs) {
+            prefabCache[Int16.Parse(p.name)] = p;
+        }
     }
+    public void SaveCurrentMap() {
+        if (mapNameInput != null && !string.IsNullOrEmpty(mapNameInput.text)) currentMapName = mapNameInput.text;
+        if (string.IsNullOrEmpty(currentMapName)) return;
+        
+        string fileName = $"{SceneManager.GetActiveScene().name}_{currentMapName.Replace(".mdm", "")}.mdm";
+        string filePath = Path.Combine(saveDirectory, fileName);
 
-    public void mapLoad(string map_loc) {
-        // if (File.Exists(pathCombine(file_path, map_name))) {
-        // var stre = JsonUtility.ToJson(parser.decode_text(json, 0), false);
-        string json = File.ReadAllText(map_loc);
-        json = json.Remove(0, 14);
-        prop_list = JsonUtility.FromJson<props>(json);
-        foreach (var prop in prop_list.props_obj) {
-            Debug.Log($"{prop.rot} < {Quaternion.Euler(prop.rot)}");
-            GameObject gm = Instantiate(Resources.Load<GameObject>($"Props/{prop.id}"), prop.pos, Quaternion.Euler(Vector3.zero), parent);
-            objes.Add(gm);
-            var prop_com = gm.GetComponent<Prop>();
-            prop_com.delete = prop.del;
-            prop_com.gravity = prop.grv;
-            prop_com.kinematic = prop.kin;
+        try {
+            using (FileStream fs = new FileStream(filePath, FileMode.Create)) {
+                using (Aes aes = Aes.Create()) {
+                    aes.Key = Key;
+                    aes.IV = IV;
 
-            Destroy(prop_com.gameObject.GetComponent<BuildPrefab>());
-            prop_com.transform.position = prop.pos;
-            // prop_com.p_set(prop.rot);
-            prop_com.transform.eulerAngles = prop.rot;// rotation = Quaternion.Euler(prop.rot); // Rotate(prop.rot, Space.Self);
-            prop_com.transform.localScale = prop.scl;
-            rote = prop.rot;
+                    using (ICryptoTransform encryptor = aes.CreateEncryptor())
+                    using (CryptoStream cryptoStream = new CryptoStream(fs, encryptor, CryptoStreamMode.Write))
+                    using (GZipStream gz = new GZipStream(cryptoStream, System.IO.Compression.CompressionLevel.Optimal))
+                    using (BinaryWriter writer = new BinaryWriter(gz, Encoding.UTF8)) {
+                        // writer.Write(SceneManager.GetActiveScene().name);
+                        // writer.Write(currentMapName);
+                        writer.Write("0.0.1");
+                        writer.Write(propsParent.childCount);
+                        writer.Write((short)0);
+
+                        int processed = 0;
+                        foreach (Transform child in propsParent) {
+                            GameObject obj = child.gameObject;
+                            if (obj == null) continue;
+                                        
+                            short _cleanName = Int16.Parse(obj.name.Replace("(Clone)", "").Trim()); 
+                            writer.Write(_cleanName);
+
+                            writer.Write(obj.transform.position.x);
+                            writer.Write(obj.transform.position.y);
+                            writer.Write(obj.transform.position.z);
+
+                            writer.Write(obj.transform.eulerAngles.x);
+                            writer.Write(obj.transform.eulerAngles.y);
+                            writer.Write(obj.transform.eulerAngles.z);
+
+                            writer.Write(obj.transform.localScale.x);
+                            writer.Write(obj.transform.localScale.y);
+                            writer.Write(obj.transform.localScale.z);
+
+                            PropInfo info = obj.GetComponent<PropInfo>();
+                            if (info != null) {
+                                writer.Write(info.SelfGravityVector.x);
+                                writer.Write(info.SelfGravityVector.y);
+                                writer.Write(info.SelfGravityVector.z);
+                                writer.Write(info.CanDelete);
+                                writer.Write(info.CanGravity);
+                                writer.Write(info.HasSelfGravity);
+                            } else {
+                                writer.Write(0f);
+                                writer.Write(-9.81f);
+                                writer.Write(0f);
+                                writer.Write(true);
+                                writer.Write(true);
+                                writer.Write(false);
+                            }
+
+                            Rigidbody rb = obj.GetComponent<Rigidbody>();
+                            writer.Write(rb != null ? rb.isKinematic : false);
+                            writer.Write(rb != null ? rb.useGravity : true);
+
+                            processed++;
+                        }
+
+                        Debug.Log($"Saved Objects: {processed}, File: {filePath}");
+
+                        writer.Flush();
+                        gz.Flush();
+                        
+                        Debug.Log($"[Save] Успешно зашифровано объектов: {processed}. Путь: {filePath}");
+                    }
+                }
+            }
+        }
+        catch (Exception e) {
+            Debug.LogError($"Save Error: {e.Message}");
         }
     }
 
-    public void mapSave() {
-        prop_list = new props();
-        foreach (GameObject _prop in objes) {
-            var p_l = new prop();
-            
-            p_l.id = int.Parse(_prop.name.Replace("(Clone)", ""));
-            p_l.pos = _prop.transform.position;
-            p_l.rot = _prop.transform.eulerAngles;
-            p_l.scl = _prop.transform.localScale;
-            var p_c = _prop.GetComponent<Prop>();
-            p_l.grv = p_c.gravity;
-            p_l.del = p_c.delete;
-            p_l.kin = p_c.kinematic;
-            prop_list.props_obj.Add(p_l);
+    public void LoadMap(string _mapFileName) {
+        if (_mapFileName == null && string.IsNullOrEmpty(_mapFileName)) return;
+        // if (string.IsNullOrEmpty(_mapFileName)) return;
+        
+        string fileName = $"{SceneManager.GetActiveScene().name}_{_mapFileName.Replace(".mdm", "")}.mdm";
+        StartCoroutine(LoadMapCoroutine(fileName));
+    }
+    public IEnumerator LoadMapCoroutine(string mapFileName) {
+        string filePath = Path.Combine(saveDirectory, mapFileName);
+        
+        if (!File.Exists(filePath)) {
+            Debug.LogError($"File Didn't Exist: {filePath}");
+            yield break;
         }
-        json = JsonUtility.ToJson(prop_list, true);
-        // string cod = parser.encode_text(json, 0);
-        map_name = map_name.Replace(".mdm", "");
-        File.WriteAllText(pathCombine(file_path, $"{SceneManager.GetActiveScene().name}_{map_name}.mdm"), "eghDcTCgbCdjCh" + json);
-    }
-    public void nameEnter() {
-        map_name = inputField.text;
+
+        ClearAllProps();
+        List<PropMeta> allData = new List<PropMeta>();
+
+        try {
+            using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read)) {
+                using (Aes aes = Aes.Create()) {
+                    aes.Key = Key;
+                    aes.IV = IV;
+
+                    using (ICryptoTransform decryptor = aes.CreateDecryptor())
+                    using (CryptoStream cryptoStream = new CryptoStream(fs, decryptor, CryptoStreamMode.Read))
+                    using (GZipStream gz = new GZipStream(cryptoStream, CompressionMode.Decompress))
+                    using (BinaryReader reader = new BinaryReader(gz, Encoding.UTF8)) {
+                        string version = reader.ReadString();
+                        int totalCount = reader.ReadInt32();
+                        short timeOfDay = reader.ReadInt16(); 
+
+                        allData.Capacity = totalCount;
+
+                        for (int i = 0; i < totalCount; i++) {
+                            PropMeta data = new PropMeta {
+                                PrefabName = reader.ReadInt16(),
+
+                                Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                                Rotation = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                                Scale = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+
+                                SelfGravityVector = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                                CanDelete = reader.ReadBoolean(),
+                                CanGravity = reader.ReadBoolean(),
+                                HasSelfGravity = reader.ReadBoolean(),
+
+                                IsKinematic = reader.ReadBoolean(),
+                                HasGravity = reader.ReadBoolean()
+                            };
+
+                            allData.Add(data);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception e) {
+            Debug.LogError($"File Load/Decrypt Error: {e.Message}");
+            yield break;
+        }
+
+        loadProgress = 0f;
+        int loaded = 0;
+        while (loaded < allData.Count) {
+            int batchCount = Mathf.Min(loadBatchSize, allData.Count - loaded);
+            for (int i = 0; i < batchCount; i++) {
+                CreatePropFromData(allData[loaded]);
+                loaded++;
+            }
+            loadProgress = (float)loaded / allData.Count;
+            yield return null;
+        }
+
+        allData.Clear();
+        Debug.Log($"Successfully decrypted and loaded: {propsParent.childCount} objects");
     }
 
-    public void PropAdd(GameObject _prop)
-    {
-        objes.Add(_prop);
-        var p_l = new prop();
+    public GameObject CreateNewProp(short _prefabName, Vector3 _pos, Quaternion _rot) {
+        if (!prefabCache.TryGetValue(_prefabName, out GameObject prefab)) {
+            prefab = Resources.Load<GameObject>($"{resourcesFolder}/{_prefabName.ToString()}");
+            if (prefab == null) return null;
+            prefabCache[_prefabName] = prefab;
+        }
+        
+        GameObject obj = Instantiate(prefab, _pos, _rot, propsParent);
+        obj.name = _prefabName.ToString();
+        
+        PropInfo info = obj.AddComponent<PropInfo>();
 
-        // Debug.Log(_prop.name.Replace("(Clone)", ""));
-        p_l.id = int.Parse(_prop.name.Replace("(Clone)", ""));
-        p_l.pos = _prop.transform.position;
-        p_l.rot = _prop.transform.eulerAngles;
-        p_l.scl = _prop.transform.localScale;
-        var p_c = _prop.GetComponent<Prop>();
-        p_l.grv = p_c.gravity;
-        p_l.del = p_c.delete;
-        p_l.kin = p_c.kinematic;
-        prop_list.props_obj.Add(p_l);
+        RemoveBuildComponent(obj);
+        return obj;
     }
-    public bool IsPropContains(GameObject _prop)
-    {
-        PropRemove(_prop);
-        return objes.Contains(_prop);
+
+    private void CreatePropFromData(PropMeta data) {
+        if (!prefabCache.TryGetValue(data.PrefabName, out GameObject prefab)) return;
+        
+        GameObject obj = Instantiate(prefab, propsParent);
+        obj.name = data.PrefabName.ToString();
+        data.ApplyToGameObject(obj);
+        PropInfo info = obj.AddComponent<PropInfo>();
+        info.SelfGravityVector = data.SelfGravityVector;
+        info.CanDelete = data.CanDelete;
+        info.CanGravity = data.CanGravity;
+        info.HasSelfGravity = data.HasSelfGravity;
+        
+        RemoveBuildComponent(obj);
     }
-    public void PropRemove(GameObject _prop)
-    {
-        objes.Remove(_prop);
+    public void EditProp(GameObject obj, PropMeta editData) {
+        if (obj == null || !IsPropContains(obj)) {
+            Debug.LogWarning("No Needed GO");
+            return;
+        }
+
+        obj.transform.position = editData.Position;
+        obj.transform.eulerAngles = editData.Rotation;
+        obj.transform.localScale = editData.Scale;
+
+        if (obj.TryGetComponent<Rigidbody>(out Rigidbody rb)) {
+            rb.isKinematic = editData.IsKinematic;
+            rb.useGravity = editData.HasGravity;
+        }
+
+        PropInfo info = obj.GetComponent<PropInfo>();
+        if (info != null) {
+            info.SelfGravityVector = editData.SelfGravityVector;
+            info.CanDelete = editData.CanDelete;
+            info.CanGravity = editData.CanGravity;
+            info.HasSelfGravity = editData.HasSelfGravity;
+        }
+
+        Debug.Log($"GO {obj.name} Edited");
     }
+
+    public PropMeta GetCurrentPropData(GameObject obj) {
+        if (obj == null || !IsPropContains(obj)) return null;
+
+        PropMeta data = new PropMeta {
+            PrefabName = Int16.Parse(obj.name),
+            Position = obj.transform.position,
+            Rotation = obj.transform.eulerAngles,
+            Scale = obj.transform.localScale
+        };
+
+        if (obj.TryGetComponent<Rigidbody>(out Rigidbody rb)) {
+            data.IsKinematic = rb.isKinematic;
+            data.HasGravity = rb.useGravity;
+        }
+
+        PropInfo info = obj.GetComponent<PropInfo>();
+        if (info != null) {
+            data.SelfGravityVector = info.SelfGravityVector;
+            data.CanDelete = info.CanDelete;
+            data.CanGravity = info.CanGravity;
+            data.HasSelfGravity = info.HasSelfGravity;
+        }
+
+        return data;
+    }
+
+    public void RemoveProp(GameObject obj) {
+        if (obj != null && obj.transform.parent == propsParent) {
+            Destroy(obj);
+        }
+    }
+    public void ClearAllProps() {
+        while (propsParent.childCount > 0) {
+            DestroyImmediate(propsParent.GetChild(0).gameObject);
+        }
+    }
+
+    private void RemoveBuildComponent(GameObject obj) {
+        if (obj.TryGetComponent<BuildPrefab>(out BuildPrefab bp)) Destroy(bp);
+    }
+
+    public bool IsPropContains(GameObject obj) => obj != null && obj.transform.parent == propsParent;
+
+    private void OnApplicationQuit() => SaveCurrentMap();
 }
-
-[Serializable]
-public class prop {
-    public int id;
-    public Vector3 pos;
-    public Vector3 rot;
-    public Vector3 scl;
-    public bool grv;
-    public bool del;
-    public bool kin;
-}
-
-[Serializable]
-public class props {
-    public List<prop> props_obj = new List<prop>();
-}
-

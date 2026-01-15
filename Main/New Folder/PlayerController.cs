@@ -1,8 +1,11 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-// namespace EPC.player
-// {
+public enum PlatformType {
+    PC,
+    Mobile
+}
+
 [System.Serializable]
 public struct MovementSettings {
     public float speedWalk;
@@ -25,18 +28,7 @@ public struct MovementSettings {
     public float slideSpeedDecay;
 }
 
-// [System.Serializable]
-// public struct HealthSettings
-// {
-//     public float healthMax;
-//     public
-//     public bool needRegen;
-//     public float healthRegen;
-//     public float healthRegenDelay;
-//     public bool infiniteHealth;
-// }
-
-public class control : MonoBehaviour {
+public class PlayerController : MonoBehaviour {
     [Header("References")]
     [SerializeField] private CharacterController _characterController;
     [SerializeField] private CapsuleCollider _coll;
@@ -44,8 +36,7 @@ public class control : MonoBehaviour {
 
     [Header("Settings")]
     [SerializeField]
-    private MovementSettings _movementSettings = new MovementSettings
-    {
+    private MovementSettings _movementSettings = new MovementSettings {
         speedWalk = 3f,
         speedRun = 6f,
         speedCrouch = 1.5f,
@@ -80,9 +71,44 @@ public class control : MonoBehaviour {
     private const float CAMERA_PITCH_MAX = 90f;
     private const float INPUT_DEADZONE = 0.1f;
     private const float STAMINA_MAX = 100f;
+    
+    private const float CAMERA_HEIGHT_MULTIPLIER = 0.6f;
+    private const float CAMERA_HEIGHT_MIN_MULTIPLIER = -0.6f;
+    private const float CAMERA_HEIGHT_MAX_MULTIPLIER = 0.3f;
+    private const float STANCE_HEIGHT_THRESHOLD = 0.01f;
+    private const float STUN_SPEED_MULTIPLIER = 0.3f;
+    private const float STUN_DAMAGE_THRESHOLD = 20f;
+    private const float STUN_DURATION = 0.5f;
+    private const float RUN_SPEED_THRESHOLD = 0.1f;
+    private const float MOUSE_SENSITIVITY_MULTIPLIER = 100f;
+    private const float CAMERA_TILT_DIVISOR = 45f;
+    private const float CAMERA_TILT_THRESHOLD = 35f;
+    private const float GLIDE_SPEED_BOOST_MULTIPLIER = 0.8f;
+    private const float GLIDE_SPEED_REDUCE_MULTIPLIER = 0.3f;
+    private const float GLIDE_FALL_MULTIPLIER_DIVE = 8f;
+    private const float GLIDE_FALL_MULTIPLIER_NORMAL = 4f;
+    private const float GLIDE_GRAVITY_MULTIPLIER_DIVE = 0.75f;
+    private const float GLIDE_GRAVITY_MULTIPLIER_NORMAL = 0.65f;
+    private const float JETPACK_VELOCITY_TARGET = 5f;
+    private const float JETPACK_VELOCITY_SPEED = 5f;
+    private const float GRAVITY_MULTIPLIER_GLIDE = 0.5f;
 
+    public bool IsFisgunRotActive;
     private Vector2 _moveInput;
     private Vector2 _mouseInput;
+    
+    [Header("Platform Settings")]
+    [SerializeField] private PlatformType _platformType = PlatformType.PC;
+    public PlatformType CurrentPlatform => _platformType;
+    
+    [Header("Mobile Input Settings")]
+    [SerializeField] private RectTransform _cameraControlPanel;
+    [SerializeField] private Camera _uiCamera;
+    [SerializeField] private JoystickBase _joystick;
+    [SerializeField] private bool _useJoystick = true;
+    private int _rightTouchId = -1;
+    private Vector2 _lookInput = Vector2.zero;
+    public bool IsMobileUIEnabled = true;
 
     [SerializeField] private Vector3 _velocity;
     private Vector3 _moveDirection;
@@ -93,10 +119,7 @@ public class control : MonoBehaviour {
 
     private bool _isGliding;
     private bool _isJetpackUsed;
-    private bool isStaminaUsed;
 
-    // [SerializeField] private float _currentStamina;
-    // [SerializeField] private float _currentHealth;
 
     [Header("Camera Settings")]
     [SerializeField] private float _cameraSmoothness = 5f;
@@ -136,16 +159,18 @@ public class control : MonoBehaviour {
     public PlayerStance CurrentStance => _currentStance;
     public float CurrentSpeed => _currentSpeed;
     public bool IsGrounded => _characterController.isGrounded;
-    // public bool IsExhausted => _isExhausted;
     private HealthSystem _health;
     private StaminaSystem _stamina;
     private InventoryController _inventoryController;
+    private PlayerAssembler PlayerAssembler;
     
 
     #region initializate
         private void Awake() {
             if (_characterController == null) _characterController = GetComponent<CharacterController>();
 
+            DetectPlatform();
+            
             var playerActions = InputManager.Instance.actions.Player;
             _jumpAction = playerActions.Jump;
             _moveAction = playerActions.Move;
@@ -166,9 +191,19 @@ public class control : MonoBehaviour {
             _health.OnDamageTaken += OnDamageTaken;
             
             _stamina.OnExhaustedStateChanged += OnExhaustedChanged;
+            PlayerAssembler = FindAnyObjectByType<PlayerAssembler>();
 
             InitializeStance();
         }
+        
+        private void DetectPlatform() {
+            #if UNITY_ANDROID || UNITY_IOS || UNITY_IPHONE
+                _platformType = PlatformType.Mobile;
+            #else
+                _platformType = PlatformType.PC;
+            #endif
+        }
+        
         private void OnPlayerDeath() {
             DisableMovement();
             enabled = false;
@@ -176,12 +211,12 @@ public class control : MonoBehaviour {
             Debug.Log("Player Died!");
         }
         private void OnDamageTaken(float damage) {
-            if (damage > 20f) 
-                StartCoroutine(StunEffect(0.5f));
+            if (damage > STUN_DAMAGE_THRESHOLD) 
+                StartCoroutine(StunEffect(STUN_DURATION));
         }
         private System.Collections.IEnumerator StunEffect(float duration) {
             float originalSpeed = _currentSpeed;
-            _currentSpeed *= 0.3f;
+            _currentSpeed *= STUN_SPEED_MULTIPLIER;
             yield return new WaitForSeconds(duration);
             _currentSpeed = originalSpeed;
         }
@@ -189,7 +224,7 @@ public class control : MonoBehaviour {
         private void OnExhaustedChanged(bool isExhausted) {
             if (isExhausted){
                 if (_isGliding) EndGlide();
-                if (_currentSpeed >= _movementSettings.speedRun - 0.1f) 
+                if (_currentSpeed >= _movementSettings.speedRun - RUN_SPEED_THRESHOLD) 
                     _currentSpeed = _movementSettings.speedWalk * _stamina._settings.exhaustedSpeedMultiplier;
             }
         }
@@ -201,10 +236,10 @@ public class control : MonoBehaviour {
             _mouseInput = _vector2Zero;
             _currentSpeed = 0f;
             if (_isGliding) EndGlide();
-            // if (_isSliding) EndSlide();
         }
         public void EnableMovement() => _currentSpeed = _movementSettings.speedWalk;
         private void SubscribeToInputActions() {
+            if (_platformType != PlatformType.PC) return;
             _jumpAction.performed += OnJump;
             _moveAction.performed += OnMove;
             _moveAction.canceled += OnMoveCanceled;
@@ -213,17 +248,16 @@ public class control : MonoBehaviour {
             _runAction.performed += OnRun;
             _runAction.canceled += OnRunCanceled;
             _crouchAction.performed += OnCrouch;
-            _crawlAction.performed += OnProne;
+            _crawlAction.performed += OnCrawl;
             _slideAction.performed += OnSlide;
             _glideAction.performed += OnGlideStart;
             _glideAction.canceled += OnGlideEnd;
             _jetpackAction.performed += OnJetpackStart;
             _jetpackAction.canceled += OnJetpackEnd;
-            _attackAction.performed += OnAttackStart;
             _reloadAction.performed += OnReloadStart;
         }
-        private void UnsubscribeFromInputActions()
-        {
+        private void UnsubscribeFromInputActions() {
+            if (_platformType != PlatformType.PC) return;
             _jumpAction.performed -= OnJump;
             _moveAction.performed -= OnMove;
             _moveAction.canceled -= OnMoveCanceled;
@@ -232,34 +266,42 @@ public class control : MonoBehaviour {
             _runAction.performed -= OnRun;
             _runAction.canceled -= OnRunCanceled;
             _crouchAction.performed -= OnCrouch;
-            _crawlAction.performed -= OnProne;
+            _crawlAction.performed -= OnCrawl;
             _slideAction.performed -= OnSlide;
             _glideAction.performed -= OnGlideStart;
             _glideAction.canceled -= OnGlideEnd;
             _jetpackAction.performed -= OnJetpackStart;
             _jetpackAction.canceled -= OnJetpackEnd;
-            _attackAction.performed -= OnAttackStart;
             _reloadAction.performed -= OnReloadStart;
         }
     #endregion
-    private void Update()
-    {
+    private void Update() {
         float deltaTime = Time.deltaTime;
         bool _isGrounded = _characterController.isGrounded;
-        if (_isGrounded && !_wasGrounded)
-        {
+        if (_isGrounded && !_wasGrounded) {
             _movementSettings.jumpCount = _movementSettings.jumpCountMax;
             if (_isGliding) EndGlide();
         }
         _wasGrounded = _isGrounded;
 
-        // if (isStaminaUsed) HandleStamina(deltaTime); // glide run
         if (!_isSliding && !_isGliding) HandleStance(deltaTime);
         if (_isSliding) HandleSlide(deltaTime);
         if (_isGliding) HandleGlide(deltaTime);
         if (_isJetpackUsed) HandleJetpack(deltaTime);
+        
+        if (_platformType == PlatformType.Mobile && _useJoystick && _joystick != null) {
+            HandleJoystickMovement();
+        }
+        
         HandleMovement(deltaTime);
-        if (_mouseInput != _vector2Zero) HandleMouseLook(deltaTime);
+        
+        if (_platformType == PlatformType.PC) {
+            if (_mouseInput != _vector2Zero) HandleMouseLook(deltaTime);
+        }
+        else {
+            if (IsMobileUIEnabled) GetTouchInput();
+            HandleMobileLook(deltaTime);
+        }
     }
     #region Movement
         #region Stance
@@ -269,7 +311,7 @@ public class control : MonoBehaviour {
                 _characterController.height = _targetHeight;
             }
             private void HandleStance(float deltaTime) {
-                if (Mathf.Abs(_characterController.height - _targetHeight) > 0.01f) {
+                if (Mathf.Abs(_characterController.height - _targetHeight) > STANCE_HEIGHT_THRESHOLD) {
                     float newHeight = Mathf.Lerp(_characterController.height, _targetHeight, heightSpeed * deltaTime);
                     _characterController.height = newHeight;
                     UpdateCameraPosition(newHeight);
@@ -277,27 +319,23 @@ public class control : MonoBehaviour {
             }
             private void UpdateCameraPosition(float newHeight) {
                 Vector3 cameraPos = _cameraTransform.localPosition;
-                cameraPos.y = newHeight * 0.6f;
-                cameraPos.y = Mathf.Clamp(cameraPos.y, -newHeight * 3 / 5, newHeight / 2 * 3 / 5);
+                cameraPos.y = newHeight * CAMERA_HEIGHT_MULTIPLIER;
+                cameraPos.y = Mathf.Clamp(cameraPos.y, newHeight * CAMERA_HEIGHT_MIN_MULTIPLIER, newHeight * CAMERA_HEIGHT_MAX_MULTIPLIER);
                 _cameraTransform.localPosition = cameraPos;
             }
             private void SetStance(PlayerStance newStance) {
                 _currentStance = newStance;
-                switch (newStance) {
-                    case PlayerStance.Standing:
-                        _targetHeight = heightStand;
-                        _currentSpeed = _movementSettings.speedWalk;
-                        break;
-                    case PlayerStance.Crouching:
-                        _targetHeight = heightCrouch;
-                        _currentSpeed = _movementSettings.speedCrouch;
-                        break;
-                    case PlayerStance.Crawl:
-                        _targetHeight = heightCrawl;
-                        _currentSpeed = _movementSettings.speedCrawl;
-                        break;
-                    case PlayerStance.Gliding:
-                        break;
+                if (newStance == PlayerStance.Standing) {
+                    _targetHeight = heightStand;
+                    _currentSpeed = _movementSettings.speedWalk;
+                }
+                else if (newStance == PlayerStance.Crouching) {
+                    _targetHeight = heightCrouch;
+                    _currentSpeed = _movementSettings.speedCrouch;
+                }
+                else if (newStance == PlayerStance.Crawl) {
+                    _targetHeight = heightCrawl;
+                    _currentSpeed = _movementSettings.speedCrawl;
                 }
             }
             public void ForceStance(PlayerStance stance) => SetStance(stance);
@@ -305,71 +343,156 @@ public class control : MonoBehaviour {
         #region Move
             private void OnMove(InputAction.CallbackContext ctx) => _moveInput = ctx.ReadValue<Vector2>();
             private void OnMoveCanceled(InputAction.CallbackContext ctx) => _moveInput = _vector2Zero;
-            private void HandleMovement(float deltaTime) {
-                if (!_isSliding && !_isGliding)
-                {
-                    // float speedMultiplier = _isExhausted ? _staminaSettings.exhaustedSpeedMultiplier : 1f;
+            
+            public void SetMobileMoveInput(Vector2 moveInput) {
+                _moveInput = moveInput;
+            }
+            
+            // Публичный метод для прямого подключения джойстика из UI
+            public void SetJoystickInput(float horizontal, float vertical) {
+                _moveInput = new Vector2(horizontal, vertical);
+            }
+            
+            private void HandleJoystickMovement() {
+                if (_joystick == null) return;
 
+                float h = _joystick.Horizontal;
+                float v = _joystick.Vertical;
+                
+                if (Mathf.Abs(h) > 0.001f || Mathf.Abs(v) > 0.001f) {
+                    _moveInput = new Vector2(h, v);
+                }
+                else if (_moveInput.sqrMagnitude < INPUT_DEADZONE * INPUT_DEADZONE) {
+                    _moveInput = _vector2Zero;
+                }
+                else _moveInput = _vector2Zero;
+            }
+            
+            // private float GetValue(System.Type type, string name) {
+            //     var prop = type.GetProperty(name);
+            //     if (prop != null) {
+            //         try { return (float)prop.GetValue(_joystick); }
+            //         catch { }
+            //     }
+            //     var field = type.GetField(name);
+            //     if (field != null) {
+            //         try { return (float)field.GetValue(_joystick); }
+            //         catch { }
+            //     }
+            //     return 0f;
+            // }
+            private void HandleMovement(float deltaTime) {
+                if (_isSliding) {
+                    _moveDirection = _slideDirection * _currentSlideSpeed;
+                }
+                else if (_isGliding) {
+                    Vector3 glideControl = (transform.right * _moveInput.x + _cameraTransform.forward * _moveInput.y + _cameraTransform.forward * _movementSettings.speedGlideMove) * _movementSettings.glideControl;
+                    Vector3 currentHorizontalVelocity = new Vector3(_velocity.x, 0, _velocity.z);
+                    _moveDirection = Vector3.ClampMagnitude(currentHorizontalVelocity + glideControl, _movementSettings.speedGlideMove);
+                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall, Mathf.Abs(_movementSettings.gravity) * deltaTime * GRAVITY_MULTIPLIER_GLIDE);
+                }
+                else {
                     Vector3 cameraForward = transform.forward;
                     Vector3 cameraRight = _cameraTransform.right;
-
                     cameraForward.y = 0;
                     cameraRight.y = 0;
                     cameraForward.Normalize();
                     cameraRight.Normalize();
-
-                    _moveDirection = (cameraRight * _moveInput.x + cameraForward * _moveInput.y) * _currentSpeed; // * speedMultiplier;
+                    _moveDirection = (cameraRight * _moveInput.x + cameraForward * _moveInput.y) * _currentSpeed;
                 }
-                else if (_isSliding)
-                {
-                    _moveDirection = _slideDirection * _currentSlideSpeed;
-                }
-                else if (_isGliding)
-                {
-                    Vector3 glideControl = (transform.right * _moveInput.x + _cameraTransform.forward * _moveInput.y + _cameraTransform.forward * _movementSettings.speedGlideMove) * _movementSettings.glideControl;
-
-                    Vector3 currentHorizontalVelocity = new Vector3(_velocity.x, 0, _velocity.z);
-                    _moveDirection = currentHorizontalVelocity + glideControl;
-                    _moveDirection = Vector3.ClampMagnitude(_moveDirection, _movementSettings.speedGlideMove);
-
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall, Mathf.Abs(_movementSettings.gravity) * deltaTime * 0.5f);
-                }
-                if (_isJetpackUsed)
-                {
-                    
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, 5f, 5f * deltaTime * 0.5f);
+                
+                if (_isJetpackUsed) {
+                    _velocity.y = Mathf.MoveTowards(_velocity.y, JETPACK_VELOCITY_TARGET, JETPACK_VELOCITY_SPEED * deltaTime * GRAVITY_MULTIPLIER_GLIDE);
                 }
                 if (_characterController.isGrounded) {
                     if (_velocity.y < 0) _velocity.y = GROUNDED_VELOCITY_Y;
                 }
                 else if (!_isGliding) _velocity.y += _movementSettings.gravity * deltaTime;
 
-                Vector3 finalMovement = (_moveDirection + _vectorUp * _velocity.y) * deltaTime;
-                _characterController.Move(finalMovement);
+                _characterController.Move((_moveDirection + _vectorUp * _velocity.y) * deltaTime);
             }
         #endregion
-        #region Mouse
+        #region Mouse/Look
             private void OnLook(InputAction.CallbackContext ctx) => _mouseInput = ctx.ReadValue<Vector2>();
             private void OnLookCanceled(InputAction.CallbackContext ctx) => _mouseInput = _vector2Zero;
+            
+            public void LookMobile()
+            {
+                IsFisgunRotActive = !IsFisgunRotActive;
+            }
+            
             private void HandleMouseLook(float deltaTime) {
-                float sensitivity = _movementSettings.mouseSens * 100f * deltaTime;
-                float xInput = _mouseInput.x * sensitivity * (_invertX ? -1f : 1f);
+                ProcessLookInput(_mouseInput, deltaTime, true);
+                _mouseInput = _vector2Zero;
+            }
+            
+            private void GetTouchInput() {
+                if (Touchscreen.current == null || _cameraControlPanel == null) return;
+                Camera cam = _uiCamera != null ? _uiCamera : Camera.main;
+                if (cam == null) return;
+                
+                for (int i = 0; i < Touchscreen.current.touches.Count; i++) {
+                    var touch = Touchscreen.current.touches[i];
+                    var phase = touch.phase.ReadValue();
+                    var position = touch.position.ReadValue();
+                    int touchId = touch.touchId.ReadValue();
+                    bool inPanel = RectTransformUtility.RectangleContainsScreenPoint(_cameraControlPanel, position, cam);
+
+                    if (phase == UnityEngine.InputSystem.TouchPhase.Began && inPanel && _rightTouchId == -1) {
+                        _rightTouchId = touchId;
+                    }
+                    else if ((phase == UnityEngine.InputSystem.TouchPhase.Canceled || phase == UnityEngine.InputSystem.TouchPhase.Ended) && touchId == _rightTouchId) {
+                        _rightTouchId = -1;
+                        _lookInput = _vector2Zero;
+                    }
+                    else if (phase == UnityEngine.InputSystem.TouchPhase.Moved && touchId == _rightTouchId) {
+                        _lookInput = touch.delta.ReadValue() * _movementSettings.mouseSens * Time.deltaTime;
+                    }
+                    else if (phase == UnityEngine.InputSystem.TouchPhase.Stationary && touchId == _rightTouchId) {
+                        _lookInput = _vector2Zero;
+                    }
+                }
+            }
+            
+            private void HandleMobileLook(float deltaTime) {
+                if (_rightTouchId != -1 && _lookInput != _vector2Zero) {
+                    ProcessLookInput(_lookInput, deltaTime, false);
+                    _lookInput = _vector2Zero;
+                }
+                else if (_mouseInput != _vector2Zero) {
+                    ProcessLookInput(_mouseInput, deltaTime, true);
+                    _mouseInput = _vector2Zero;
+                }
+            }
+            
+            private void ProcessLookInput(Vector2 input, float deltaTime, bool useDeltaTime) {
+                if (IsFisgunRotActive) {
+                    PlayerAssembler.AddPropRotation(input);
+                    return;
+                }
+                float sensitivity = useDeltaTime ? _movementSettings.mouseSens * MOUSE_SENSITIVITY_MULTIPLIER * deltaTime : MOUSE_SENSITIVITY_MULTIPLIER;
+                float xInput = input.x * sensitivity * (_invertX ? -1f : 1f);
+                float yInput = input.y * sensitivity * (_invertY ? 1f : -1f);
                 transform.Rotate(_vectorUp, xInput);
-
-                float yInput = _mouseInput.y * sensitivity * (_invertY ? 1f : -1f);
-                _targetCameraPitch = Mathf.Clamp(_targetCameraPitch + yInput, CAMERA_PITCH_MIN, CAMERA_PITCH_MAX);
-
+                _targetCameraPitch = Mathf.Clamp(_targetCameraPitch + (useDeltaTime ? yInput : -yInput), CAMERA_PITCH_MIN, CAMERA_PITCH_MAX);
                 _cameraPitch = Mathf.Lerp(_cameraPitch, _targetCameraPitch, _cameraSmoothness * deltaTime);
                 _cameraTransform.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
-
-                _mouseInput = _vector2Zero;
+            }
+            
+            public void SetMobileLookInput(Vector2 lookInput) {
+                _mouseInput = lookInput;
             }
         #endregion 
         #region Run
+            public void MobileOnRun()
+            {
+                if (!_isSliding && _currentStance == PlayerStance.Standing && !_stamina.IsExhausted) {
+                    _currentSpeed = CurrentSpeed == _movementSettings.speedRun ? _movementSettings.speedWalk : _movementSettings.speedRun;
+                }
+            }
             private void OnRun(InputAction.CallbackContext ctx) {
                 if (!_isSliding && _currentStance == PlayerStance.Standing && !_stamina.IsExhausted) {
-                    if (ctx.performed) _currentSpeed = _movementSettings.speedRun;
-                    else if (ctx.canceled) _currentSpeed = _movementSettings.speedWalk;
+                    _currentSpeed = ctx.performed ? _movementSettings.speedRun : _movementSettings.speedWalk;
                 }
             }
             private void OnRunCanceled(InputAction.CallbackContext ctx) {
@@ -378,7 +501,7 @@ public class control : MonoBehaviour {
         #endregion
         #region Jump
             private void OnJump(InputAction.CallbackContext ctx) => Jump();
-            private void Jump() {
+            public void Jump() {
                 if ((_characterController.isGrounded && !_isSliding && _currentStance != PlayerStance.Crawl) || _movementSettings.jumpCount > 0) {
                     float jumpPower = _movementSettings.jumpPower;
 
@@ -392,33 +515,39 @@ public class control : MonoBehaviour {
             }
     #endregion
         #region Crouch
-            private void ToggleCrouch() => SetStance(_currentStance == PlayerStance.Crouching ? PlayerStance.Standing : PlayerStance.Crouching);
-            private void OnCrouch(InputAction.CallbackContext ctx)
-            {
+            public void ToggleCrouch() => SetStance(_currentStance == PlayerStance.Crouching ? PlayerStance.Standing : PlayerStance.Crouching);
+            private void OnCrouch(InputAction.CallbackContext ctx) {
                 if (!_isSliding) ToggleCrouch();
             }
+            
+            public void MobileCrouch() => OnCrouch(default);
         #endregion
         #region Crawl
-            private void ToggleProne() => SetStance(_currentStance == PlayerStance.Crawl ? PlayerStance.Standing : PlayerStance.Crawl);
-            private void OnProne(InputAction.CallbackContext ctx) {
-                if (!_isSliding) ToggleProne();
+            public void ToggleCrawl() => SetStance(_currentStance == PlayerStance.Crawl ? PlayerStance.Standing : PlayerStance.Crawl);
+            private void OnCrawl(InputAction.CallbackContext ctx) {
+                if (!_isSliding) ToggleCrawl();
             }
+            public void MobileCrawl() => OnCrawl(default);
         #endregion
         #region Slide
             private bool CanSlide() {
-                return _characterController.isGrounded && !_isSliding /*&& _slideCooldownTimer <= 0*/ && (_currentStance == PlayerStance.Standing || _currentStance == PlayerStance.Crouching) &&
+                return _characterController.isGrounded && !_isSliding && (_currentStance == PlayerStance.Standing || _currentStance == PlayerStance.Crouching) &&
                         _moveInput.sqrMagnitude > INPUT_DEADZONE * INPUT_DEADZONE;
             }
             private void OnSlide(InputAction.CallbackContext ctx) {
                 if (CanSlide()) StartSlide();
             }
+            
+            public void MobileSlide() => OnSlide(default);
+        #endregion
             private void StartSlide() {
                 _isSliding = true;
                 _slideTimer = 0f;
-                // _slideCooldownTimer = _movementSettings.slideCooldown;
                 _currentSlideSpeed = _movementSettings.speedSlide;
-                if (_moveInput.sqrMagnitude > INPUT_DEADZONE * INPUT_DEADZONE) _slideDirection = (transform.right * _moveInput.x + transform.forward * _moveInput.y).normalized;
-                else _slideDirection = transform.forward;
+                if (_moveInput.sqrMagnitude > INPUT_DEADZONE * INPUT_DEADZONE) 
+                    _slideDirection = (transform.right * _moveInput.x + transform.forward * _moveInput.y).normalized;
+                else 
+                    _slideDirection = transform.forward;
                 SetStance(PlayerStance.Crouching);
                 _characterController.height = heightCrouch;
             }
@@ -436,7 +565,7 @@ public class control : MonoBehaviour {
         #endregion
         #region Glide
             private bool CanGlide() {
-                return !_characterController.isGrounded && !_isGliding && _velocity.y < 0; // && _currentStamina > 0 ; // && _currentStance != PlayerStance.Crawl;
+                return !_characterController.isGrounded && !_isGliding && _velocity.y < 0;
             }
             private void OnGlideStart(InputAction.CallbackContext ctx) {
                 if (CanGlide()) StartGlide();
@@ -444,72 +573,47 @@ public class control : MonoBehaviour {
             private void OnGlideEnd(InputAction.CallbackContext ctx) {
                 if (_isGliding) EndGlide();
             }
-
-            //private System.Collections.IEnumerator PerformGlideSlam() {
-            //    float duration = 0.8f;
-            //    float elapsed = 0f;
-            //    float startPitch = _cameraPitch;
-            //    float targetPitch = -80f;
-
-            //    while (elapsed < duration && _isGliding) {
-            //        _cameraPitch = Mathf.Lerp(startPitch, targetPitch, elapsed / duration);
-            //        _cameraTransform.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
-
-            //        _velocity.y = Mathf.Lerp(_velocity.y, _movementSettings.gravity * 2f, elapsed / duration);
-
-            //        elapsed += Time.deltaTime;
-            //        yield return null;
-            //    }
-            //    _currentSpeed += 3f;
-            //}
-            private void StartGlide() {
-                _isGliding = true;
-                ObjGlider.SetActive(true);
-
-                Vector3 horizontalVelocity = new Vector3(_velocity.x, 0, _velocity.z);
-                if (horizontalVelocity.magnitude < _movementSettings.speedGlideMove) {
-                    horizontalVelocity = horizontalVelocity.normalized * _movementSettings.speedGlideMove;
+            public void GlideMobile()
+            {
+                if (_isGliding) EndGlide();
+                else 
+                {
+                    if (CanGlide()) StartGlide();
                 }
-                _velocity = new Vector3(horizontalVelocity.x, _movementSettings.glideFall, horizontalVelocity.z);
+            }
+
+            private void StartGlide() {
+                StartAerial(true);
             }
             private void HandleGlide(float deltaTime) {
-                float absPitch = Mathf.Abs(_cameraPitch);
-                float cameraTiltFactor = absPitch / 45f;
-
-                if (_cameraPitch < -35f) {
-                    float speedBoost = 0.8f * cameraTiltFactor;
-                    _moveDirection *= speedBoost;
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall * 8f, Mathf.Abs(_movementSettings.gravity) * deltaTime * 0.75f);
-                }
-                else if (_cameraPitch > 35f) {
-                    float speedReduce = 1f - (0.3f * cameraTiltFactor);
-                    _moveDirection *= speedReduce;
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall * 8f, Mathf.Abs(_movementSettings.gravity) * deltaTime);
-                }
-                else {
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall * 4f, Mathf.Abs(_movementSettings.gravity) * deltaTime * 0.65f);
-                }
-                // float targetPitch = Mathf.Clamp(_cameraPitch - 10f, CAMERA_PITCH_MIN, CAMERA_PITCH_MAX);
-                // _cameraPitch = Mathf.Lerp(_cameraPitch, targetPitch, 5f * deltaTime);
-                // _cameraTransform.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
+                HandleAerialMovement(deltaTime, _movementSettings.glideFall);
             }
-            private void EndGlide()
-            {
+            private void EndGlide() {
                 ObjGlider.SetActive(false);
                 _isGliding = false;
             }
         #endregion
         #region Jetpack
-            private void OnJetpackStart(InputAction.CallbackContext ctx) {
-                StartGlide();
-            }
+            private void OnJetpackStart(InputAction.CallbackContext ctx) => StartJetpack();
             private void OnJetpackEnd(InputAction.CallbackContext ctx) {
                 if (_isJetpackUsed) EndJetpack();
             }
+            public void MobileJetpackStart() => StartJetpack();
+            public void MobileJetpackEnd() {
+                if (_isJetpackUsed) EndJetpack();
+            }
             private void StartJetpack() {
-                _isJetpackUsed = true;
-                ObjJetpack.SetActive(true);
-
+                StartAerial(false);
+            }
+            private void StartAerial(bool isGlide) {
+                if (isGlide) {
+                    _isGliding = true;
+                    ObjGlider.SetActive(true);
+                }
+                else {
+                    _isJetpackUsed = true;
+                    ObjJetpack.SetActive(true);
+                }
                 Vector3 horizontalVelocity = new Vector3(_velocity.x, 0, _velocity.z);
                 if (horizontalVelocity.magnitude < _movementSettings.speedGlideMove) {
                     horizontalVelocity = horizontalVelocity.normalized * _movementSettings.speedGlideMove;
@@ -517,116 +621,42 @@ public class control : MonoBehaviour {
                 _velocity = new Vector3(horizontalVelocity.x, _movementSettings.glideFall, horizontalVelocity.z);
             }
             private void HandleJetpack(float deltaTime) {
+                HandleAerialMovement(deltaTime, _movementSettings.glideFall);
+            }
+            
+            private void HandleAerialMovement(float deltaTime, float baseFallSpeed) {
                 float absPitch = Mathf.Abs(_cameraPitch);
-                float cameraTiltFactor = absPitch / 45f;
+                float cameraTiltFactor = absPitch / CAMERA_TILT_DIVISOR;
 
-                if (_cameraPitch < -35f) {
-                    float speedBoost = 0.8f * cameraTiltFactor;
+                if (_cameraPitch < -CAMERA_TILT_THRESHOLD) {
+                    float speedBoost = GLIDE_SPEED_BOOST_MULTIPLIER * cameraTiltFactor;
                     _moveDirection *= speedBoost;
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall * 8f, Mathf.Abs(_movementSettings.gravity) * deltaTime * 0.75f);
+                    _velocity.y = Mathf.MoveTowards(_velocity.y, baseFallSpeed * GLIDE_FALL_MULTIPLIER_DIVE, 
+                        Mathf.Abs(_movementSettings.gravity) * deltaTime * GLIDE_GRAVITY_MULTIPLIER_DIVE);
                 }
-                else if (_cameraPitch > 35f) {
-                    float speedReduce = 1f - (0.3f * cameraTiltFactor);
+                else if (_cameraPitch > CAMERA_TILT_THRESHOLD) {
+                    float speedReduce = 1f - (GLIDE_SPEED_REDUCE_MULTIPLIER * cameraTiltFactor);
                     _moveDirection *= speedReduce;
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall * 8f, Mathf.Abs(_movementSettings.gravity) * deltaTime);
+                    _velocity.y = Mathf.MoveTowards(_velocity.y, baseFallSpeed * GLIDE_FALL_MULTIPLIER_DIVE, 
+                        Mathf.Abs(_movementSettings.gravity) * deltaTime);
                 }
                 else {
-                    _velocity.y = Mathf.MoveTowards(_velocity.y, _movementSettings.glideFall * 4f, Mathf.Abs(_movementSettings.gravity) * deltaTime * 0.65f);
+                    _velocity.y = Mathf.MoveTowards(_velocity.y, baseFallSpeed * GLIDE_FALL_MULTIPLIER_NORMAL, 
+                        Mathf.Abs(_movementSettings.gravity) * deltaTime * GLIDE_GRAVITY_MULTIPLIER_NORMAL);
                 }
-                // float targetPitch = Mathf.Clamp(_cameraPitch - 10f, CAMERA_PITCH_MIN, CAMERA_PITCH_MAX);
-                // _cameraPitch = Mathf.Lerp(_cameraPitch, targetPitch, 5f * deltaTime);
-                // _cameraTransform.localRotation = Quaternion.Euler(_cameraPitch, 0f, 0f);
             }
             private void EndJetpack(){ 
                 ObjJetpack.SetActive(false);
                 _isJetpackUsed = false;
             }
         #endregion
-        /* #region Stamina
-        private void HandleStamina(float deltaTime) {
-            if (_staminaSettings.infiniteStamina) return;
-            if (_currentStamina <= 0) {
-                _currentStamina = 0;
-                _isExhausted = true;
-
-                if (_currentSpeed >= _movementSettings.speedRun - 0.1f) _currentSpeed = _movementSettings.speedWalk * _staminaSettings.exhaustedSpeedMultiplier;
-            }
-            else {
-                if (_currentSpeed >= _movementSettings.speedRun - 0.1f && _moveInput != Vector2.zero && _characterController.isGrounded){
-                    _currentStamina -= _staminaSettings.StaminaDrainRun * deltaTime;
-                    isStaminaUsed = true;
-                }
-            }
-
-            if (!isStaminaUsed && _currentStamina < _staminaSettings.staminaMax) {
-                _staminaRegenTimer += deltaTime;
-                if (_staminaRegenTimer >= _staminaSettings.staminaRegenDelay) {
-                    _currentStamina += _staminaSettings.staminaRegen * deltaTime;
-                    _currentStamina = Mathf.Min(_currentStamina, _staminaSettings.staminaMax);
-
-                    if (_currentStamina >= _staminaSettings.staminaMax * 0.3f) _isExhausted = false;
-                }
-            }
-            else _staminaRegenTimer = 0f;
-        }
-        public void AddStamina(float amount) {
-            _currentStamina = Mathf.Clamp(_currentStamina + amount, 0, _staminaSettings.staminaMax);
-        }
-        public void SetInfiniteStamina(bool enabled) {
-            _staminaSettings.infiniteStamina = enabled;
-            if (enabled) {
-                _currentStamina = _staminaSettings.staminaMax;
-                _isExhausted = false;
-            }
-        }
-        public void ResetStamina() {
-            _currentStamina = _staminaSettings.staminaMax;
-            _isExhausted = false;
-            _staminaRegenTimer = 0f;
-        }
-        public void ToggleInfiniteStamina()
-        {
-            SetInfiniteStamina(!_staminaSettings.infiniteStamina);
-            Debug.Log($"Infinity: {_staminaSettings.infiniteStamina}");
-        }
-        #endregion */
-    #endregion
     #region Inventory
-        private bool CanAttack()
-        {
-            return true;
-        }
-        private bool CanReload()
-        {
-            return true;
-        }
-        private void OnAttackStart(InputAction.CallbackContext ctx)
-        {
-            if (CanAttack()) StartAttack();
-        }
-        private void StartAttack()
-        {
-            Debug.Log("df");
-        } 
-        private void OnReloadStart(InputAction.CallbackContext ctx)
-        {
-            if (CanReload()) StartReload();
-        }
-        private void StartReload()
-        {
-            Debug.Log("Df");
-        }
+        private void OnAttackStart(InputAction.CallbackContext ctx) => StartAttack();
+        private void StartAttack() => Debug.Log("df");
+        public void MobileAttack() => StartAttack();
+        
+        private void OnReloadStart(InputAction.CallbackContext ctx) => StartReload();
+        private void StartReload() => Debug.Log("Df");
+        public void MobileReload() => StartReload();
     #endregion
-    // gizmoz
-    // private void OnDrawGizmosSelected() {
-    //     if (_characterController != null) {
-    //         Gizmos.color = Color.green;
-    //         Gizmos.DrawWireSphere(transform.position + _characterController.center, 0.1f);
-
-    //         if (_isGliding) {
-    //             Gizmos.color = Color.blue;
-    //             Gizmos.DrawRay(transform.position, _moveDirection.normalized * 2f);
-    //         }
-    //     }
-    // }
 }
